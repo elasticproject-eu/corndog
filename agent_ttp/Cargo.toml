@@ -1,0 +1,19 @@
+[package]
+name = "agent_ttp"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+ed25519-dalek = { workspace = true }
+blake3 = { workspace = true }
+hex = { workspace = true }
+sha2 = { workspace = true }
+rand = { workspace = true }
+getrandom = { workspace = true }
+zeroize = { workspace = true }

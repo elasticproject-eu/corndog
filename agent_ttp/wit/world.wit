@@ -1,0 +1,6 @@
+package fairexchange:ttp;
+
+world ttp-agent {
+    export init: func();
+    export process-request: func(request: list<u8>) -> list<u8>; 
+}

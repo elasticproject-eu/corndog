@@ -1,0 +1,4 @@
+Sample file to testing fair-exchange migration
+SSG - Secure Systems Group
+Platform Security
+TEE - Trust Execution Environment

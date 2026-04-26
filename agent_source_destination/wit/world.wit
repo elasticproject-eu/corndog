@@ -1,0 +1,18 @@
+package fairexchange:unified;
+
+interface types {
+    variant agent-action {
+        send-to-peer(list<u8>),
+        send-to-ttp(list<u8>),
+        wait-for-peer,
+        complete-success(string),
+        complete-failure(string),
+    }
+}
+
+world unified-agent {
+    use types.{agent-action};
+    
+    export init: func(config: list<u8>);
+    export process-message: func(incoming: option<list<u8>>) -> agent-action;
+}

@@ -1,0 +1,11 @@
+[package]
+name = "common"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = { workspace = true }
+tokio = { workspace = true }
+blake3 = { workspace = true }
+hex = { workspace = true }
+wit-bindgen = { workspace = true }
