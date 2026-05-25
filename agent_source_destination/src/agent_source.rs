@@ -28,17 +28,14 @@ pub struct AgentSource {
     contract_message: ContractMessage,
     contract_signature: Vec<u8>,
     secret_as: [u8; 32],
+    data_string: String,
     commitment_ad: Option<Vec<u8>>,
-    // signing_key: Signingkey,
-    // sig_ad: Vec<u8>,
-    // sig_aborted: Vec<u8>,
-    // sig_resolved: Vec<u8>,
     comm_msg_as: Option<CommunicationMessage>, // Send this to TTP for ABORTING
     comm_msg_ad: Option<CommunicationMessage>, // Send this with comm_msg_as to TTP for RESOLVING
 }
 
 impl AgentSource {
-    pub fn new(file_metadata: FileMetadata, source_pubkey: Vec<u8>, dest_pubkey: Vec<u8>) -> Self {
+    pub fn new(string_metadata: StringMetadata, source_pubkey: Vec<u8>, dest_pubkey: Vec<u8>) -> Self {
         eprintln!("[AS] Creating Agent");
 
         // Create identity (vk, sk) for AS
@@ -57,14 +54,12 @@ impl AgentSource {
 
         // Compute contract_id before sending
         let mut contract_hasher = Sha256::new();
-        contract_hasher.update(file_metadata.file_name.as_bytes());
-        contract_hasher.update(file_metadata.file_hash.as_bytes());
+        contract_hasher.update(string_metadata.hash.as_bytes());
         let contract_id = hex::encode(contract_hasher.finalize());
 
         // AS signs contract
         let mut contract_msg = Vec::new();
-        contract_msg.extend_from_slice(file_metadata.file_name.as_bytes());
-        contract_msg.extend_from_slice(file_metadata.file_hash.as_bytes());
+        contract_msg.extend_from_slice(string_metadata.hash.as_bytes());
         contract_msg.extend_from_slice(&source_pubkey);
         contract_msg.extend_from_slice(&dest_pubkey);
         contract_msg.extend_from_slice(&commitment_as);
@@ -78,8 +73,7 @@ impl AgentSource {
         // Create contract message
         let contract_message = ContractMessage {
             contract_id,
-            file_name: file_metadata.file_name.clone(),
-            file_hash: file_metadata.file_hash.clone(),
+            data_hash: string_metadata.hash.clone(),
             source_pubkey: source_pubkey.clone(),
             dest_pubkey: dest_pubkey.clone(),
             commitment_secret: commitment_as.to_vec(),
@@ -92,6 +86,7 @@ impl AgentSource {
             contract_message,
             contract_signature,
             secret_as,
+            data_string: string_metadata.data.clone(),
             commitment_ad: None,
             comm_msg_as: None,
             comm_msg_ad: None,
@@ -137,8 +132,7 @@ impl AgentSource {
                         // Verify signature of AD — reconstruct signed bytes: file_name || file_hash || source_pubkey || dest_pubkey || commitment_secret
                         let c = &comm_msg.contract_message;
                         let mut msg_bytes = Vec::new();
-                        msg_bytes.extend_from_slice(c.file_name.as_bytes());
-                        msg_bytes.extend_from_slice(c.file_hash.as_bytes());
+                        msg_bytes.extend_from_slice(c.data_hash.as_bytes());
                         msg_bytes.extend_from_slice(&c.source_pubkey);
                         msg_bytes.extend_from_slice(&c.dest_pubkey);
                         msg_bytes.extend_from_slice(&c.commitment_secret);
@@ -192,20 +186,31 @@ impl AgentSource {
                     Some (bytes) => {
                         eprintln!("[AS] Received AD's secret");
 
-                        let secret_ad = bytes;
-
                         let commitment_ad = self.commitment_ad.as_ref().unwrap();
-                        let opened_commitment = blake3::hash(&secret_ad);
-
-                        if opened_commitment.as_bytes() != commitment_ad.as_slice() {
-                            panic!("[AS] incorrect AD's secret");
-                            // TODO - send invoke to TTP
-                            
+                        if blake3::hash(&bytes).as_bytes() != commitment_ad.as_slice() {
+                            panic!("[AS] AD's secret does not match commitment");
                         }
+                        eprintln!("[AS] Verified AD's secret — protocol complete");
 
-                        eprintln!("[AS] Successfully verified AD's secret");
+                        let output = CommitmentOutput {
+                            source_id: hex::encode(&self.contract_message.source_pubkey),
+                            dest_id: hex::encode(&self.contract_message.dest_pubkey),
+                            data: self.data_string.clone(),
+                            hash: self.contract_message.data_hash.clone(),
+                            // commitment_as = BLAKE3(secret_as), stored inside AS's contract
+                            signature_source: hex::encode(&self.contract_message.commitment_secret),
+                            // commitment_ad = BLAKE3(secret_ad), stored inside AD's contract
+                            signature_destination: hex::encode(
+                                &self.comm_msg_ad.as_ref().unwrap().contract_message.commitment_secret,
+                            ),
+                            status: "commit".to_string(),
+                            method: "direct".to_string(),
+                        };
+                        
+                        let output_json = serde_json::to_string_pretty(&output)
+                            .expect("[AS] Failed to serialize CommitmentOutput");
 
-                        AgentAction::CompleteSuccess("[AS] Fair Exchange Complete".to_string())
+                        AgentAction::CompleteSuccess(output_json)
                     }
                     None => {
                         // Invoke TTP for Resolving

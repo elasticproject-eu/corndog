@@ -1,93 +1,189 @@
-# Optimistic-fair-exchange-migration-Wasm
+# CornDog - Fair Exchange Migration
 
+A Rust + WebAssembly implementation for securely transferring data between two parties, with a Trusted Third Party (TTP) available only for dispute resolution.
 
+---
 
-## Getting started
+## Table of Contents
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+1. [What this project does](#1-what-this-project-does)
+2. [Protocol overview](#2-protocol-overview)
+3. [Project structure](#3-project-structure)
+4. [Prerequisites](#4-prerequisites)
+5. [Building the project](#5-building-the-project)
+6. [Key management](#6-key-management)
+7. [Running the protocol](#7-running-the-protocol)
+8. [Understanding the output](#8-understanding-the-output)
+9. [Testing timeout and TTP scenarios](#9-testing-timeout-and-ttp-scenarios)
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+---
 
-## Add your files
+## 1. What this project does
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+Two parties — **Source (RS)** and **Destination (RD)** — want to exchange a piece of data such that either both parties end up with a cryptographic proof the exchange happened, or neither does. This is the *fairness* guarantee.
 
+The protocol is **optimistic**: in the optimal case, the two parties complete the exchange directly between themselves without involving a third party at all. The TTP is only contacted when one party suspects the other is misbehaving or has gone offline.
+
+At the end of a successful exchange both parties independently print the same JSON receipt to stdout:
+
+```json
+{
+  "source_id": "<hex of source long-term public key>",
+  "dest_id": "<hex of destination long-term public key>",
+  "data": "SomeStringHere",
+  "hash": "<BLAKE3 hex of SomeStringHere>",
+  "signature_source": "<hex of BLAKE3(secret_as)>",
+  "signature_destination": "<hex of BLAKE3(secret_ad)>",
+  "status": "commit",
+  "method": "direct"
+}
 ```
-cd existing_repo
-git remote add origin https://version.aalto.fi/gitlab/ngox1/Optimistic-fair-exchange-migration-Wasm.git
-git branch -M main
-git push -uf origin main
+
+- `status: "commit"` — the exchange completed successfully.
+- `status: "rollback"` — the exchange was aborted.
+- `method: "direct"` — completed without TTP intervention.
+- `method: "arbitrated"` — the TTP was contacted to resolve or abort.
+
+---
+
+## 2. Protocol overview
+
+### Parties
+
+| Name | Short | Role |
+|---|---|---|
+| Agent Source | AS | Receives input from RS and takes care of the logical part of the fair exchange protocol |
+| Agent Destination | AD | Receives input from RD and takes care of the logical part of the fair exchange protocol |
+| Runtime Source | RS | Initiates the exchange, loads AS component, holds the data and interacts with AS |
+| Runtime Destination | RD | Receives the data from RS, loads AD component, interacts with AD |
+| Runtime TTP | TTP | Trusted third party; only contacted on timeout |
+
+### Optimal / Normal Case
+
+RS                                  RD                         TTP
+|                                   |                           |
+|-- StringTransfer (data) --------->|                           |
+|                                   |                           |
+|<== Fair Exchange Protocol =======>|                           |
+|                                   |                           |
+|-- CommunicationMessage(AS) ------>|                           |
+|<-- CommunicationMessage(AD) ------|                           |
+|-- secret_as (32 bytes) ---------->|                           |
+|<-- secret_ad (32 bytes) ----------|                           |
+|                                   |                           |
+[Both print JSON receipt to stdout]
+
+### What the messages contain
+
+1. **CommunicationMessage(AS):** Source's ephemeral signing key, a contract (hash of data, both long-term public keys, `commitment_as = BLAKE3(secret_as)`), and Source's signature over it.
+2. **CommunicationMessage(AD):** Same structure but for Destination — includes `commitment_ad = BLAKE3(secret_ad)` and Destination's signature.
+3. **secret_as / secret_ad:** 32-byte random secrets. Once received and verified against the commitment, the holder has proof the other party committed.
+
+### Timeout / TTP path
+
+If either party does not receive a message within the timeout window (default 5 seconds):
+
+- **Source** hasn't received AD's verification → sends **AbortRequest** to TTP.
+- **Source or Destination** hasn't received the other's secret → sends **ResolveRequest** to TTP.
+
+The TTP is stateful per session (keyed by Source's ephemeral verifying key). Once it decides Abort or Resolve for a session, it never changes its mind, ensuring consistency.
+
+You must share the **public key** files with the other party before running. Source needs `dest.key.pub`; Destination needs `source.key.pub`.
+
+---
+
+## 7. Running the protocol
+
+Open **three terminals** in the project root. Start them in this order.
+
+### Terminal 1 — TTP (must start first)
+
+```bash
+./target/release/runtime_ttp
 ```
 
-## Integrate with your tools
+TTP listens on `127.0.0.1:9705`.
 
-- [ ] [Set up project integrations](https://version.aalto.fi/gitlab/ngox1/Optimistic-fair-exchange-migration-Wasm/-/settings/integrations)
+### Terminal 2 — Destination (start second)
 
-## Collaborate with your team
+```bash
+echo "SomeStringHere" | ./target/release/runtime_destination \
+    --dest-private-key dest.key \
+    --source-public-key source.key.pub
+```
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+Destination listens on `127.0.0.1:7760` and waits for Source.
 
-## Test and Deploy
+### Terminal 3 — Source (start last)
 
-Use the built-in continuous integration in GitLab.
+```bash
+echo "SomeStringHere" | ./target/release/runtime_source \
+    --source-private-key source.key \
+    --destination-public-key dest.key.pub
+```
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+**Important:** The string you `echo` must be identical in both Terminal 2 and Terminal 3. The protocol verifies this via BLAKE3 hash comparison before proceeding.
 
-***
+### Expected output
 
-# Editing this README
+Both Terminal 2 and Terminal 3 print to **stdout**:
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+```json
+{
+  "source_id": "f425f42fa0de1c5023a3b044faeb67c02616b8a0deee185e7422cabb441f924c",
+  "dest_id": "fc1ee006b897eba08872ee5272e6a1831d1556c9f868263bb6445c4e618f4289",
+  "data": "SomeStringHere",
+  "hash": "4b38951afc2ca66b16842e904f2898103b72b396779c31286393884492c8ed15",
+  "signature_source": "6a9d3209eb5f19125db22f0b29127349dbbe1b6a8f3d2d3eb941042e937433bf",
+  "signature_destination": "0433a9e3761831bd2e2e7d5df89e4f532c9a12ac52570b740d018966e1ef547c",
+  "status": "commit",
+  "method": "direct"
+}
+```
 
-## Suggestions for a good README
+Debug logs from both runtimes and the WASM agents go to **stderr** and do not appear on stdout. To silence them entirely: append `2>/dev/null` to your commands.
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+---
 
-## Name
-Choose a self-explaining name for your project.
+## 8. Understanding the output
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+| Field | Meaning |
+|---|---|
+| `source_id` | Source's long-term Ed25519 public key (hex). Identifies who initiated the exchange. |
+| `dest_id` | Destination's long-term Ed25519 public key (hex). Identifies who received it. |
+| `data` | The actual string that was exchanged. |
+| `hash` | BLAKE3 hash of `data`. Both parties compute this independently — if they disagree, the protocol aborts. |
+| `signature_source` | `BLAKE3(secret_as)` — Source's commitment. Proof that Source committed to this exchange. |
+| `signature_destination` | `BLAKE3(secret_ad)` — Destination's commitment. Proof that Destination committed to this exchange. |
+| `status` | `"commit"` — exchange succeeded. `"rollback"` — exchange was aborted. |
+| `method` | `"direct"` — no TTP involvement. `"arbitrated"` — TTP was contacted to resolve or abort. |
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+Both parties produce **identical JSON** on success. You can verify fairness by checking that both receipts match and that `BLAKE3(data) == hash`.
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+---
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+## 9. Testing timeout and TTP scenarios
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+The runtimes contain commented-out sleep calls for simulating party misbehaviour. They are marked with `===== TEST CASE OF SLEEPING =====` comments.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+**To simulate Source going offline after sending its contract (tests Destination's abort path):**
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+In `runtime_source/src/main.rs`, find the `counter == 2` block and uncomment:
+```rust
+tokio::time::sleep(DELAY_SECRET_AS).await;
+```
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+**To simulate Destination going offline before sending its verification (tests Source's abort path):**
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+In `runtime_destination/src/main.rs`, find the `counter == 1` block and uncomment:
+```rust
+tokio::time::sleep(DELAY_MSG_AD).await;
+```
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+When a timeout occurs, the affected party contacts the TTP. The TTP either:
+- **ABORTs** — if contacted before any secret is revealed; the exchange is cancelled.
+- **RESOLVEs** — if contacted after at least one secret was revealed; the TTP helps complete the exchange.
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+The TTP guarantees consistency: once a session is ABORTED it can never be RESOLVED, and vice versa.
 
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+---

@@ -22,17 +22,19 @@ pub struct AgentDestination {
     state: DestinationState,
     source_pubkey: Vec<u8>,
     dest_pubkey: Vec<u8>,
-    verifying_key_ad: [u8; 32],
-    contract_message: ContractMessage,
-    contract_signature: Option<Vec<u8>>,
+    contract_message: ContractMessage,   // AD's ContractMessage (with commitment_ad)
     secret_ad: [u8; 32],
+    data_string: String,
+    expected_hash: String,
     commitment_as: Option<Vec<u8>>,
     comm_msg_as: Option<CommunicationMessage>,
     comm_msg_ad: Option<CommunicationMessage>,
+    /// Stored here after WaitingSecretAS so Complete can return it.
+    commitment_output: Option<String>,
 }
 
 impl AgentDestination {
-    pub fn new(file_metadata: FileMetadata, source_pubkey: Vec<u8>, dest_pubkey: Vec<u8>) -> Self {
+    pub fn new(string_metadata: StringMetadata, source_pubkey: Vec<u8>, dest_pubkey: Vec<u8>) -> Self {
         eprintln!("[AD] Creating Agent");
 
         // Generate secret_ad
@@ -48,18 +50,13 @@ impl AgentDestination {
 
         // Compute contract_id before sending
         let mut contract_hasher = Sha256::new();
-        contract_hasher.update(file_metadata.file_name.as_bytes());
-        contract_hasher.update(file_metadata.file_hash.as_bytes());
+        contract_hasher.update(string_metadata.hash.as_bytes());
         let contract_id = hex::encode(contract_hasher.finalize());
-
-        // pre-assign default value for vk_ad_bytes
-        let initialized_values: [u8; 32] = [0; 32];
         
         // Create contract message
         let contract_message = ContractMessage {
             contract_id,
-            file_name: file_metadata.file_name.clone(),
-            file_hash: file_metadata.file_hash.clone(),
+            data_hash: string_metadata.hash.clone(),
             source_pubkey: source_pubkey.clone(),
             dest_pubkey: dest_pubkey.clone(),
             commitment_secret: commitment_ad.to_vec(),
@@ -67,16 +64,18 @@ impl AgentDestination {
 
         AgentDestination {
             state: DestinationState::WaitingTrigger,
-            source_pubkey: source_pubkey.clone(),
-            dest_pubkey: dest_pubkey.clone(),
-            verifying_key_ad: initialized_values,
+            source_pubkey,
+            dest_pubkey,
             contract_message,
-            contract_signature: None,
             secret_ad,
+            data_string: string_metadata.data.clone(),
+            expected_hash: string_metadata.hash.clone(),
             commitment_as: None,
             comm_msg_as: None,
             comm_msg_ad: None,
+            commitment_output: None,
         }
+
     }
 
     pub fn process(&mut self, incoming: Option<Vec<u8>>) -> AgentAction {
@@ -105,16 +104,24 @@ impl AgentDestination {
                         // Verify signature of AS — reconstruct signed bytes: file_name || file_hash || source_pubkey || dest_pubkey || commitment_secret
                         let c = &comm_msg_as.contract_message;
                         let mut msg_bytes = Vec::new();
-                        msg_bytes.extend_from_slice(c.file_name.as_bytes());
-                        msg_bytes.extend_from_slice(c.file_hash.as_bytes());
+                        msg_bytes.extend_from_slice(c.data_hash.as_bytes());
                         msg_bytes.extend_from_slice(&c.source_pubkey);
                         msg_bytes.extend_from_slice(&c.dest_pubkey);
                         msg_bytes.extend_from_slice(&c.commitment_secret);
                         if !Identity::verify(&comm_msg_as.verifying_key_agent, &msg_bytes, &comm_msg_as.contract_signature) {
                             panic!("[AD] Failed to verify signature of AS");
-                            // TODO: Need to invoke TTP for aborting here
                         }
-                        eprintln!("[AD] Successfully verified AS's signature");
+                         eprintln!("[AD] Successfully verified AS's signature");
+
+                        // Verify that Source's hash matches the hash AD computed from its own stdin
+                        if c.data_hash != self.expected_hash {
+                            panic!(
+                                "[AD] Hash mismatch! Source committed to hash '{}' but Destination computed '{}'",
+                                c.data_hash, self.expected_hash
+                            );
+                        }
+                        eprintln!("[AD] Hash verified: Source and Destination agree on the data");
+
                         self.commitment_as = Some(c.commitment_secret.clone());
 
                         // Create identity (pk, vk) for AD
@@ -122,20 +129,11 @@ impl AgentDestination {
 
                         // Parse contract received from AS
                         let contract_as = comm_msg_as.contract_message.clone();
-
-                        // Verify host pubkeys
-                        // if contract_as.source_pubkey != self.source_pubkey || contract_as.dest_pubkey != self.dest_pubkey {
-                        //     panic!("[AD] public keys of hosts mismatch")
-                        //     // TODO: need to invoke TTP to resolve
-                        // }
-
-                        // TODO: Verify contract_id too
                         
                         // AD signs contract — same byte layout: file_name || file_hash || source_pubkey || dest_pubkey || commitment_secret
                         let cm = &self.contract_message;
                         let mut msg_for_sign = Vec::new();
-                        msg_for_sign.extend_from_slice(cm.file_name.as_bytes());
-                        msg_for_sign.extend_from_slice(cm.file_hash.as_bytes());
+                        msg_for_sign.extend_from_slice(cm.data_hash.as_bytes());
                         msg_for_sign.extend_from_slice(&cm.source_pubkey);
                         msg_for_sign.extend_from_slice(&cm.dest_pubkey);
                         msg_for_sign.extend_from_slice(&cm.commitment_secret);
@@ -169,20 +167,35 @@ impl AgentDestination {
                     Some(bytes) => {
                         eprintln!("[AD] Received AS's secret");
 
-                        let secret_as = bytes;
                         let commitment_as = self.commitment_as.as_ref().unwrap();
-                        let opened_commitment = blake3::hash(&secret_as);
+                        if blake3::hash(&bytes).as_bytes() != commitment_as.as_slice() {
+                            panic!("[AD] AS's secret does not match commitment");
+                        }
+                        eprintln!("[AD] Verified AS's secret");
 
-                        if opened_commitment.as_bytes() != commitment_as.as_slice() {
-                            panic!("[AD] incorrect AS's secret");
-                            // TODO - send invoke to TTP
-                        } 
-
-                        eprintln!("[AD] Successfully verified AS's secret");
+                        let output = CommitmentOutput {
+                            source_id: hex::encode(&self.source_pubkey),
+                            dest_id: hex::encode(&self.dest_pubkey),
+                            data: self.data_string.clone(),
+                            hash: self.expected_hash.clone(),
+                            // commitment_as is inside AS's contract_message
+                            signature_source: hex::encode(
+                                &self.comm_msg_as.as_ref().unwrap().contract_message.commitment_secret,
+                            ),
+                            // commitment_ad is inside AD's own contract_message
+                            signature_destination: hex::encode(
+                                &self.contract_message.commitment_secret,
+                            ),
+                            status: "commit".to_string(),
+                            method: "direct".to_string(),
+                        };
+                        self.commitment_output = Some(
+                            serde_json::to_string_pretty(&output)
+                                .expect("[AD] Failed to serialize CommitmentOutput"),
+                        );
 
                         self.state = DestinationState::Complete;
-
-                        eprintln!("[AD] Revealing AD's secret");
+                        eprintln!("[AD] Revealing AD's secret to AS");
                         AgentAction::SendToPeer(self.secret_ad.to_vec())
                     }
                     None => {
@@ -259,7 +272,9 @@ impl AgentDestination {
             }
             DestinationState::Complete => {
                 eprintln!("[AD] Exchange completed");
-                AgentAction::CompleteSuccess("[AD] Protocol ended here".to_string())
+                let output = self.commitment_output.clone()
+                    .unwrap_or_else(|| "[AD] Protocol ended here".to_string());
+                AgentAction::CompleteSuccess(output)
             }
         }
     }

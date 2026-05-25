@@ -33,7 +33,7 @@ impl Guest for Component {
         // Based on role of Agent (AS/AD), initialize appropriate configuration
         match config.role {
             AgentRole::Source => {
-                let agent_source = AgentSource::new(config.file_metadata, config.source_pubkey, config.dest_pubkey);
+                let agent_source = AgentSource::new(config.string_metadata, config.source_pubkey, config.dest_pubkey);
                 // Store in thread-local state
                 AGENT_SOURCE.with(|state| {
                     *state.borrow_mut() = Some(agent_source);
@@ -41,7 +41,7 @@ impl Guest for Component {
                 eprintln!("[Unified-Agent]: AS successfully initialized");
             }
             AgentRole::Destination => {
-                let agent_dest = AgentDestination::new(config.file_metadata, config.source_pubkey, config.dest_pubkey);
+                let agent_dest = AgentDestination::new(config.string_metadata, config.source_pubkey, config.dest_pubkey);
                 AGENT_DESTINATION.with(|state| {
                     *state.borrow_mut() = Some(agent_dest);
                 });

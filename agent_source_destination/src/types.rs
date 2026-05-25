@@ -3,7 +3,7 @@ use serde::{Serialize, Deserialize};
 #[derive(Serialize, Deserialize)]
 pub struct InitConfig {
     pub role: AgentRole,
-    pub file_metadata: FileMetadata,
+    pub string_metadata: StringMetadata,
     pub source_pubkey: Vec<u8>,
     pub dest_pubkey: Vec<u8>,
 }
@@ -15,9 +15,9 @@ pub enum AgentRole {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct FileMetadata {
-    pub file_name: String,
-    pub file_hash: String,
+pub struct StringMetadata {
+    pub data: String,
+    pub hash: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -52,8 +52,7 @@ pub enum Decision {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ContractMessage {
     pub contract_id: String,
-    pub file_name: String,
-    pub file_hash: String,
+    pub data_hash: String,
     pub source_pubkey: Vec<u8>,
     pub dest_pubkey: Vec<u8>,
     pub commitment_secret: Vec<u8>,
@@ -69,4 +68,16 @@ pub struct CommunicationMessage {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SecretMessage {
     pub secret: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct CommitmentOutput {
+    pub source_id: String,
+    pub dest_id: String,
+    pub data: String,
+    pub hash: String,
+    pub signature_source: String,
+    pub signature_destination: String,
+    pub status: String,
+    pub method: String,
 }

@@ -18,3 +18,7 @@ wasmtime-wasi = { workspace = true }
 serde_json = { workspace = true }
 serde = { workspace = true}
 hex = { workspace = true }
+clap = { workspace = true }
+ed25519-dalek = { workspace = true }
+blake3 = { workspace = true }
+rand = { workspace = true }

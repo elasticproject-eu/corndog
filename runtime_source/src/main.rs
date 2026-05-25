@@ -16,6 +16,10 @@ use wasmtime::component::*;
 use wasmtime::{Config, Engine, Store};
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiView};
 
+use ed25519_dalek::{SigningKey, VerifyingKey};
+use clap::Parser;
+use std::io::Read as StdRead;
+
 struct HostState {
     wasi_ctx: WasiCtx,
     table: ResourceTable,
@@ -32,39 +36,137 @@ wasmtime::component::bindgen!({
     async: true,
 });
 
+#[derive(Serialize, Deserialize)]
+struct StringTransfer {
+    data: String,
+    source_pubkey: Vec<u8>,
+}
+
+#[derive(Parser)]
+#[command(name = "runtime_source")]
+struct Cli {
+    /// Path to this source's Ed25519 private key file (hex-encoded, 32 bytes).
+    /// If the file does not exist, a new key pair is generated and saved here,
+    /// with the public key written to <path>.pub automatically.
+    #[arg(long, value_name = "FILE")]
+    source_private_key: PathBuf,
+
+    /// Path to the destination's Ed25519 public key file (hex-encoded, 32 bytes).
+    #[arg(long, value_name = "FILE")]
+    destination_public_key: PathBuf,
+}
+
+/// Load a SigningKey from a hex file, or generate + save a new one if missing.
+fn load_or_generate_signing_key(path: &PathBuf) -> Result<SigningKey> {
+    if path.exists() {
+        let hex_str = std::fs::read_to_string(path)
+            .with_context(|| format!("Cannot read private key from {:?}", path))?;
+        let bytes = hex::decode(hex_str.trim())
+            .context("Private key file is not valid hex")?;
+        let bytes_array: [u8; 32] = bytes
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("Private key must be exactly 32 bytes"))?;
+        Ok(SigningKey::from_bytes(&bytes_array))
+    } else {
+        use rand::rngs::OsRng;
+        let key = SigningKey::generate(&mut OsRng);
+
+        // Save private key
+        std::fs::write(path, hex::encode(key.to_bytes()))
+            .with_context(|| format!("Cannot write private key to {:?}", path))?;
+
+        // Save companion public key  (<path>.pub)
+        let pub_path = PathBuf::from(format!("{}.pub", path.display()));
+        std::fs::write(&pub_path, hex::encode(key.verifying_key().to_bytes()))
+            .with_context(|| format!("Cannot write public key to {:?}", pub_path))?;
+
+        info!("Generated new key pair → {:?}  (pub: {:?})", path, pub_path);
+        Ok(key)
+    }
+}
+
+/// Load a VerifyingKey from a hex file.
+fn load_verifying_key(path: &PathBuf) -> Result<VerifyingKey> {
+    let hex_str = std::fs::read_to_string(path)
+        .with_context(|| format!("Cannot read public key from {:?}", path))?;
+    let bytes = hex::decode(hex_str.trim())
+        .context("Public key file is not valid hex")?;
+    let bytes_array: [u8; 32] = bytes
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("Public key must be exactly 32 bytes"))?;
+    VerifyingKey::from_bytes(&bytes_array).context("Invalid Ed25519 public key")
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
+        .with_writer(std::io::stderr) // put all output goes to stderr instead of stdout
         .init();
+
+    let cli = Cli::parse();
 
     info!("==================================================");
     info!("|| Runtime Source Starting                      ||");
     info!("==================================================");
 
-    // Read generic data
-    let file_path = PathBuf::from("test-files/data.txt");
-    let file_data = std::fs::read(&file_path)
-        .context("Failed to read test file")?;
-    let file_hash = compute_file_hash(&file_data);
-    let file_name = file_path.file_name().unwrap().to_str().unwrap().to_string();
-    
-    info!("✓ File: {} ({} bytes)", file_name, file_data.len());
-    info!("✓ File hash: {}", &file_hash);
+    // 1. Load or generate RS's own key pair
+    let signing_key = load_or_generate_signing_key(&cli.source_private_key)?;
+    let source_pubkey = signing_key.verifying_key().to_bytes().to_vec();
+    info!("✓ Source public key: {}", hex::encode(&source_pubkey));
 
-    let stream_d = TcpStream::connect("127.0.0.1:7760").await.context("Failed to connect to Runtime Destination")?;
+    // 2. Load RD's public key
+    let dest_vk = load_verifying_key(&cli.destination_public_key)?;
+    let dest_pubkey = dest_vk.to_bytes().to_vec();
+    info!("✓ Destination public key loaded: {}", hex::encode(&dest_pubkey));
+
+    // 3. Read the string from stdin (the part before "| runtime_source ..." in the shell pipe)
+    let input_string = {
+        let mut buf = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buf)
+            .context("Failed to read from stdin")?;
+        // Strip trailing newline added by `echo`
+        buf.trim_end_matches('\n').to_string()
+    };
+    info!("✓ Input string: {:?} ({} bytes)", input_string, input_string.len());
+
+    // 4. Hash the string with BLAKE3 (reuse common::compute_file_hash which is just BLAKE3)
+    let string_hash = compute_file_hash(input_string.as_bytes());
+    info!("✓ String BLAKE3 hash: {}", string_hash);
+
+        // 5. Connect to RD and TTP
+    let stream_d = TcpStream::connect("127.0.0.1:7760")
+        .await
+        .context("Failed to connect to Runtime Destination")?;
     info!("✓ Connected to destination");
 
-    let stream_ttp = TcpStream::connect("127.0.0.1:9705").await.context("Failed to connect to Runtime TTP")?;
+    let stream_ttp = TcpStream::connect("127.0.0.1:9705")
+        .await
+        .context("Failed to connect to Runtime TTP")?;
     info!("✓ Connected to TTP");
 
-    fair_exchange(stream_d, stream_ttp, file_name.clone(), file_hash, file_data).await?;
+    // 6. Run the fair-exchange protocol
+    fair_exchange(
+        stream_d,
+        stream_ttp,
+        input_string,
+        string_hash,
+        source_pubkey,
+        dest_pubkey,
+    )
+    .await?;
 
     Ok(())
 
 }
 
-async fn fair_exchange(mut stream_d: TcpStream, mut stream_ttp: TcpStream, file_name: String, file_hash: String, file_data: Vec<u8>) -> Result<()> {
+async fn fair_exchange(mut stream_d: TcpStream,
+    mut stream_ttp: TcpStream,
+    input_string: String,
+    string_hash: String,
+    source_pubkey: Vec<u8>,
+    dest_pubkey: Vec<u8>,) -> Result<()> {
     // Load component
     let mut config = Config::new();
     config.wasm_component_model(true);
@@ -97,12 +199,12 @@ async fn fair_exchange(mut stream_d: TcpStream, mut stream_ttp: TcpStream, file_
     // Initialize agent with config
     let init_config = InitConfig {
         role: AgentRole::Source,
-        file_metadata: FileMetaData {
-            file_name: file_name.clone(),
-            file_hash: file_hash.clone(),
+        string_metadata: StringMetadata {
+            data: input_string.clone(),
+            hash: string_hash.clone(),
         },
-        source_pubkey: vec![1u8; 32], // TODO: Need to update with real public key
-        dest_pubkey: vec![1u8; 32], // TODO: Need to update with real public key
+        source_pubkey: source_pubkey.clone(),
+        dest_pubkey: dest_pubkey.clone(),
     };
 
     let config_bytes = serde_json::to_vec(&init_config)?;
@@ -111,9 +213,14 @@ async fn fair_exchange(mut stream_d: TcpStream, mut stream_ttp: TcpStream, file_
 
     info!("AS successfully initialized");
 
-    info!("Step 1 - File sending");
-    send_file(&mut stream_d, &file_name, &file_data).await?;
-    info!("Complete file sending");
+    info!("Step 1 — Sending string to Runtime Destination");
+    let transfer = StringTransfer {
+        data: input_string.clone(),
+        source_pubkey: source_pubkey.clone(),
+    };
+    let transfer_bytes = serde_json::to_vec(&transfer)?;
+    send_bytes(&mut stream_d, &transfer_bytes).await?;
+    info!("String sent ({} bytes wire)", transfer_bytes.len());
 
     let mut counter = 0; // Set a counter to add delay when AS sends secret_as
 
@@ -151,8 +258,10 @@ async fn fair_exchange(mut stream_d: TcpStream, mut stream_ttp: TcpStream, file_
                 info!("Receive {} bytes from RuntimeTTP", ttp_response.len());
                 action = agent.call_process_message(&mut store, Some(&ttp_response)).await?;
             }
-            AgentAction::CompleteSuccess(reason) => {
-                info!("Exchange completed with: {}", reason);
+            AgentAction::CompleteSuccess(commitment_json) => {
+                info!("=== Protocol Succeeded ===");
+                // Print the CommitmentOutput JSON to stdout
+                println!("{}", commitment_json);
                 break;
             }
             AgentAction::CompleteFailure(reason) => {
@@ -171,7 +280,7 @@ async fn fair_exchange(mut stream_d: TcpStream, mut stream_ttp: TcpStream, file_
 #[derive(Serialize, Deserialize)]
 struct InitConfig {
     role: AgentRole,
-    file_metadata: FileMetaData,
+    string_metadata: StringMetadata,
     source_pubkey: Vec<u8>,
     dest_pubkey: Vec<u8>,
 }
@@ -182,7 +291,7 @@ enum AgentRole {
 }
 
 #[derive(Serialize, Deserialize)]
-struct FileMetaData {
-    file_name: String,
-    file_hash: String,
+struct StringMetadata {
+    data: String,
+    hash: String,
 }
