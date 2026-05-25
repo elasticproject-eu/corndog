@@ -92,6 +92,132 @@ You must share the **public key** files with the other party before running. Sou
 
 ---
 
+## 3. Project structure
+
+```
+corndog/
+├── common/                     # Shared TCP framing and BLAKE3 hashing utilities
+├── agent_source_destination/   # WASM component: fair-exchange logic for Source and Destination
+│   ├── src/
+│   │   ├── agent_source.rs     # Source-side protocol state machine
+│   │   ├── agent_destination.rs# Destination-side protocol state machine
+│   │   ├── identity.rs         # Ed25519 key and commitment types
+│   │   └── types.rs            # Shared message types (CommunicationMessage, etc.)
+│   └── wit/world.wit           # WIT interface exported by this component
+├── agent_ttp/                  # WASM component: TTP arbitration logic
+│   ├── src/
+│   │   ├── agent_ttp.rs        # Session-keyed abort/resolve state machine
+│   │   └── identity.rs, types.rs
+│   └── wit/world.wit           # WIT interface exported by this component
+├── runtime_source/             # Native binary: Source host runtime
+├── runtime_destination/        # Native binary: Destination host runtime
+└── runtime_ttp/                # Native binary: TTP host runtime (serves multiple sessions)
+```
+
+The two agent crates are compiled to `wasm32-wasip2` and loaded at runtime by the host binaries via **Wasmtime**. All cryptographic protocol logic lives inside the WASM components; the host runtimes handle only networking and I/O.
+
+---
+
+## 4. Prerequisites
+
+- **Rust** (stable toolchain) — install via [rustup](https://rustup.rs/)
+- **wasm32-wasip2 target** — needed to compile the agent components:
+  ```bash
+  rustup target add wasm32-wasip2
+  ```
+- **`wasm-tools`** — used internally by `wit-bindgen` and Wasmtime's component model; install via Cargo or your package manager:
+  ```bash
+  cargo install wasm-tools
+  ```
+
+No other runtime dependencies are required. All cryptographic primitives (`ed25519-dalek`, `blake3`) are pulled in as Cargo crates.
+
+---
+
+## 5. Building the project
+
+Build in two steps: the WASM agent components first, then the native host runtimes.
+
+### Step 1 — compile the WASM components
+
+```bash
+cargo build --release --target wasm32-wasip2 \
+    -p agent_source_destination \
+    -p agent_ttp
+```
+
+This produces:
+```
+target/wasm32-wasip2/release/agent_source_destination.wasm
+target/wasm32-wasip2/release/agent_ttp.wasm
+```
+
+### Step 2 — compile the native host runtimes
+
+```bash
+cargo build --release \
+    -p runtime_source \
+    -p runtime_destination \
+    -p runtime_ttp
+```
+
+This produces:
+```
+target/release/runtime_source
+target/release/runtime_destination
+target/release/runtime_ttp
+```
+
+All three host binaries expect the WASM files from Step 1 to exist at the paths above relative to the **working directory where you run them**, so run them from the project root.
+
+---
+
+## 6. Key management
+
+Each party needs an Ed25519 key pair. Key files are plain hex strings (64 hex characters = 32 bytes) stored in plain text files.
+
+### Generating keys
+
+Use `--generate-keypair` to create a key pair without starting an exchange. It is mutually exclusive with the normal operation arguments and exits immediately after writing the files.
+
+```bash
+# Source generates source.key and source.key.pub
+./target/release/runtime_source --generate-keypair source.key
+```
+
+```bash
+# Destination generates dest.key and dest.key.pub
+./target/release/runtime_destination --generate-keypair dest.key
+```
+
+The private key is written to the path you supply; the companion `.pub` file is created at `<path>.pub` automatically. If either file already exists the command will exit with an error. To overwrite, add `--force` / `-f`:
+
+```bash
+./target/release/runtime_source --generate-keypair source.key --force
+```
+
+### Exchanging public keys
+
+Before running the full protocol, the two parties must share their public key files out-of-band:
+
+| Party | File to share | Used by |
+|---|---|---|
+| Source | `source.key.pub` | Destination (`--source-public-key`) |
+| Destination | `dest.key.pub` | Source (`--destination-public-key`) |
+
+The Destination runtime verifies that the `source_pubkey` embedded in the TCP `StringTransfer` message matches the file provided via `--source-public-key`, and rejects the connection if they differ.
+
+### Key file format
+
+Both private and public key files contain a single line: a lowercase hex string with no whitespace, representing 32 bytes. You can inspect or generate them manually:
+
+```bash
+# Generate a raw 32-byte key and hex-encode it
+openssl rand -hex 32 > mykey.key
+```
+
+---
+
 ## 7. Running the protocol
 
 Open **three terminals** in the project root. Start them in this order.

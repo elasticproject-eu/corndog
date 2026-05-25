@@ -45,15 +45,23 @@ struct StringTransfer {
 #[derive(Parser)]
 #[command(name = "runtime_source")]
 struct Cli {
+    /// Generate a new Ed25519 key pair: private key at FILE, public key at FILE.pub. Then exit.
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["source_private_key", "destination_public_key"])]
+    generate_keypair: Option<PathBuf>,
+
+    /// Overwrite existing key files when using --generate-keypair.
+    #[arg(long, short = 'f', requires = "generate_keypair")]
+    force: bool,
+
     /// Path to this source's Ed25519 private key file (hex-encoded, 32 bytes).
     /// If the file does not exist, a new key pair is generated and saved here,
     /// with the public key written to <path>.pub automatically.
-    #[arg(long, value_name = "FILE")]
-    source_private_key: PathBuf,
+    #[arg(long, value_name = "FILE", required_unless_present = "generate_keypair")]
+    source_private_key: Option<PathBuf>,
 
     /// Path to the destination's Ed25519 public key file (hex-encoded, 32 bytes).
-    #[arg(long, value_name = "FILE")]
-    destination_public_key: PathBuf,
+    #[arg(long, value_name = "FILE", required_unless_present = "generate_keypair")]
+    destination_public_key: Option<PathBuf>,
 }
 
 /// Load a SigningKey from a hex file, or generate + save a new one if missing.
@@ -97,6 +105,27 @@ fn load_verifying_key(path: &PathBuf) -> Result<VerifyingKey> {
     VerifyingKey::from_bytes(&bytes_array).context("Invalid Ed25519 public key")
 }
 
+fn generate_keypair_files(path: &PathBuf, force: bool) -> Result<()> {
+    let pub_path = PathBuf::from(format!("{}.pub", path.display()));
+    if !force {
+        if path.exists() {
+            anyhow::bail!("{} already exists; use --force to overwrite", path.display());
+        }
+        if pub_path.exists() {
+            anyhow::bail!("{} already exists; use --force to overwrite", pub_path.display());
+        }
+    }
+    use rand::rngs::OsRng;
+    let key = SigningKey::generate(&mut OsRng);
+    std::fs::write(path, hex::encode(key.to_bytes()))
+        .with_context(|| format!("Cannot write private key to {:?}", path))?;
+    std::fs::write(&pub_path, hex::encode(key.verifying_key().to_bytes()))
+        .with_context(|| format!("Cannot write public key to {:?}", pub_path))?;
+    println!("Generated private key: {}", path.display());
+    println!("Generated public key:  {}", pub_path.display());
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -106,17 +135,21 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
+    if let Some(key_path) = cli.generate_keypair {
+        return generate_keypair_files(&key_path, cli.force);
+    }
+
     info!("==================================================");
     info!("|| Runtime Source Starting                      ||");
     info!("==================================================");
 
     // 1. Load or generate RS's own key pair
-    let signing_key = load_or_generate_signing_key(&cli.source_private_key)?;
+    let signing_key = load_or_generate_signing_key(&cli.source_private_key.expect("Mandatory argument, should always be present"))?;
     let source_pubkey = signing_key.verifying_key().to_bytes().to_vec();
     info!("✓ Source public key: {}", hex::encode(&source_pubkey));
 
     // 2. Load RD's public key
-    let dest_vk = load_verifying_key(&cli.destination_public_key)?;
+    let dest_vk = load_verifying_key(&cli.destination_public_key.expect("Mandatory argument, should always be present"))?;
     let dest_pubkey = dest_vk.to_bytes().to_vec();
     info!("✓ Destination public key loaded: {}", hex::encode(&dest_pubkey));
 
