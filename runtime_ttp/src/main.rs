@@ -2,13 +2,13 @@ use anyhow::{Context, Result};
 use common::*;
 
 use tracing::{info, error};
-use std::path::PathBuf;
-use serde::{Serialize, Deserialize};
+use std::net::SocketAddr;
 
 use tokio::net::{TcpStream, TcpListener};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::{timeout, Duration};
+
+use clap::Parser;
 
 use wasmtime::component::*;
 use wasmtime::{Config, Engine, Store};
@@ -32,24 +32,34 @@ wasmtime::component::bindgen!({
 
 type TtpRequest = (Vec<u8>, oneshot::Sender<Vec<u8>>);
 
+#[derive(Parser)]
+#[command(name = "runtime_ttp")]
+struct Cli {
+    /// Address to listen on for incoming runtime connections.
+    #[arg(long, default_value = "0.0.0.0:9705", value_name = "ADDR")]
+    listen_addr: SocketAddr,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .init();
 
+    let cli = Cli::parse();
+
     info!("==================================================");
     info!("||       TTP Runtime Starting                   ||");
     info!("==================================================");
-    
+
     let (tx, rx) = mpsc::channel::<TtpRequest>(32);
     // Spawn a single task that owns a agent_ttp Wasm instance that is being share
     let local = tokio::task::LocalSet::new();
     local.spawn_local(ttp_worker(rx));
 
     // Listen for connection
-    let listener = TcpListener::bind("127.0.0.1:9705").await?;
-    println!("Listening on 127.0.0.1:9705");
+    let listener = TcpListener::bind(cli.listen_addr).await?;
+    println!("Listening on {}", cli.listen_addr);
     
     local.run_until( async move {
         loop {

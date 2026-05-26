@@ -21,6 +21,7 @@ use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiView};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use clap::Parser;
 use std::io::Read as StdRead;
+use std::net::SocketAddr;
 
 struct HostState {
     wasi_ctx: WasiCtx,
@@ -59,6 +60,14 @@ struct Cli {
     /// Used to independently verify the source identity before trusting the TCP transfer.
     #[arg(long, value_name = "FILE", required_unless_present = "generate_keypair")]
     source_public_key: Option<PathBuf>,
+
+    /// Address to listen on for incoming Source connections.
+    #[arg(long, default_value = "0.0.0.0:7760", value_name = "ADDR")]
+    listen_addr: SocketAddr,
+
+    /// Address of the TTP runtime to connect to.
+    #[arg(long, default_value = "0.0.0.0:9705", value_name = "ADDR")]
+    ttp_addr: SocketAddr,
 }
 
 fn load_or_generate_signing_key(path: &PathBuf) -> Result<SigningKey> {
@@ -162,13 +171,13 @@ async fn main() -> Result<()> {
     info!("✓ Own BLAKE3 hash: {}", own_hash);
 
     // Listen for connection from source
-    let listener = TcpListener::bind("127.0.0.1:7760").await?;
-    eprintln!("Listening on 127.0.0.1:7760");
-    
+    let listener = TcpListener::bind(cli.listen_addr).await?;
+    eprintln!("Listening on {}", cli.listen_addr);
+
     let (stream, addr) = listener.accept().await?;
     eprintln!("✓ Connection from {}", addr);
 
-    let stream_ttp = TcpStream::connect("127.0.0.1:9705").await.context("Failed to connect to Runtime TTP")?;
+    let stream_ttp = TcpStream::connect(cli.ttp_addr).await.context("Failed to connect to Runtime TTP")?;
     info!("✓ Connected to TTP");
 
     // Handle the exchange

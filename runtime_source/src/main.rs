@@ -19,6 +19,7 @@ use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiView};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use clap::Parser;
 use std::io::Read as StdRead;
+use std::net::SocketAddr;
 
 struct HostState {
     wasi_ctx: WasiCtx,
@@ -62,6 +63,14 @@ struct Cli {
     /// Path to the destination's Ed25519 public key file (hex-encoded, 32 bytes).
     #[arg(long, value_name = "FILE", required_unless_present = "generate_keypair")]
     destination_public_key: Option<PathBuf>,
+
+    /// Address of the Destination runtime to connect to.
+    #[arg(long, default_value = "0.0.0.0:7760", value_name = "ADDR")]
+    destination_addr: SocketAddr,
+
+    /// Address of the TTP runtime to connect to.
+    #[arg(long, default_value = "0.0.0.0:9705", value_name = "ADDR")]
+    ttp_addr: SocketAddr,
 }
 
 /// Load a SigningKey from a hex file, or generate + save a new one if missing.
@@ -169,12 +178,12 @@ async fn main() -> Result<()> {
     info!("✓ String BLAKE3 hash: {}", string_hash);
 
         // 5. Connect to RD and TTP
-    let stream_d = TcpStream::connect("127.0.0.1:7760")
+    let stream_d = TcpStream::connect(cli.destination_addr)
         .await
         .context("Failed to connect to Runtime Destination")?;
     info!("✓ Connected to destination");
 
-    let stream_ttp = TcpStream::connect("127.0.0.1:9705")
+    let stream_ttp = TcpStream::connect(cli.ttp_addr)
         .await
         .context("Failed to connect to Runtime TTP")?;
     info!("✓ Connected to TTP");
