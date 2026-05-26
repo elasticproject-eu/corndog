@@ -2,6 +2,8 @@
 
 A Rust + WebAssembly implementation for securely transferring data between two parties, with a Trusted Third Party (TTP) available only for dispute resolution.
 
+_AI Note: While the protocol implementations compiled to Wasm are written in the normal way, the "runtime" code that invokes them has been edited with the aid of Claude Code to assemble a demo and associated documentation._
+
 ---
 
 ## Table of Contents
