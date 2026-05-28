@@ -230,7 +230,7 @@ Open **three terminals** in the project root. Start them in this order.
 ./target/release/runtime_ttp
 ```
 
-TTP listens on `127.0.0.1:9705`.
+TTP listens on `0.0.0.0:9705` by default. Override with `--listen-addr ADDR`.
 
 ### Terminal 2 — Destination (start second)
 
@@ -240,7 +240,7 @@ echo "SomeStringHere" | ./target/release/runtime_destination \
     --source-public-key source.key.pub
 ```
 
-Destination listens on `127.0.0.1:7760` and waits for Source.
+Destination listens on `0.0.0.0:7760` by default and waits for Source. Override with `--listen-addr ADDR`. The TTP address defaults to `0.0.0.0:9705`; override with `--ttp-addr ADDR`.
 
 ### Terminal 3 — Source (start last)
 
@@ -249,6 +249,8 @@ echo "SomeStringHere" | ./target/release/runtime_source \
     --source-private-key source.key \
     --destination-public-key dest.key.pub
 ```
+
+The Destination address defaults to `0.0.0.0:7760` and TTP to `0.0.0.0:9705`; override with `--destination-addr ADDR` and `--ttp-addr ADDR` respectively.
 
 **Important:** The string you `echo` must be identical in both Terminal 2 and Terminal 3. The protocol verifies this via BLAKE3 hash comparison before proceeding.
 
@@ -306,6 +308,13 @@ tokio::time::sleep(DELAY_SECRET_AS).await;
 In `runtime_destination/src/main.rs`, find the `counter == 1` block and uncomment:
 ```rust
 tokio::time::sleep(DELAY_MSG_AD).await;
+```
+
+**To simulate Destination going offline before sending its secret (tests Source's resolve path):**
+
+In `runtime_destination/src/main.rs`, find the `counter == 2` block and uncomment:
+```rust
+tokio::time::sleep(DELAY_SECRET_AD).await;
 ```
 
 When a timeout occurs, the affected party contacts the TTP. The TTP either:
