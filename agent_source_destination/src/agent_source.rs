@@ -239,8 +239,7 @@ impl AgentSource {
                         let signed_msg_ttp: TtpResponse = match serde_json::from_slice(&bytes) {
                             Ok(response) => response,
                             Err(_) => {
-                                panic!("[AS] failed to extract signature responded by TTP");
-                                // No need to do anything
+                                return AgentAction::CompleteFailure("[AS] Failed to parse TTP response".to_string());
                             }
                         };
 
@@ -271,9 +270,23 @@ impl AgentSource {
                             msg_bytes.extend_from_slice(&signed_msg_ttp.ttp_signature);
                             msg_bytes.extend_from_slice(&signed_msg_ttp.ttp_verifying_key);
                             if !Identity::verify(&signed_msg_ttp.ttp_verifying_key, &signed_abort_request_bytes, &signed_msg_ttp.ttp_signature) {
-                                panic!("[AS] Failed to verify signature of TTP");
-                                // No need to do anything
+                                return AgentAction::CompleteFailure("[AS] Failed to verify TTP ABORTED signature".to_string());
                             }
+                            let output = CommitmentOutput {
+                                source_id: hex::encode(&self.contract_message.source_pubkey),
+                                dest_id:   hex::encode(&self.contract_message.dest_pubkey),
+                                data:      self.data_string.clone(),
+                                hash:      self.contract_message.data_hash.clone(),
+                                signature_source:      hex::encode(&self.contract_message.commitment_secret),
+                                // comm_msg_ad is None in the WaitingAbortTTP case — AD never sent its contract.
+                                signature_destination: self.comm_msg_ad.as_ref()
+                                    .map(|m| hex::encode(&m.contract_message.commitment_secret))
+                                    .unwrap_or_default(),
+                                status: "rollback".to_string(),
+                                method: "arbitrated".to_string(),
+                            };
+                            let output_json = serde_json::to_string_pretty(&output).expect("[AS] Failed to serialize CommitmentOutput");
+                            AgentAction::CompleteSuccess(output_json);
                             eprintln!("[AS] Successfully verified AD signature and obtained signed contract with *ABORTED* state");
                         } else {
                             // Response type of TTP is "RESOLVED"
@@ -293,6 +306,18 @@ impl AgentSource {
                                 panic!("[AS] Failed to verify signature of TTP");
                                 // No need to do anything
                             }
+                            let output = CommitmentOutput {
+                                source_id: hex::encode(&self.contract_message.source_pubkey),
+                                dest_id:   hex::encode(&self.contract_message.dest_pubkey),
+                                data:      self.data_string.clone(),
+                                hash:      self.contract_message.data_hash.clone(),
+                                signature_source:      hex::encode(&self.contract_message.commitment_secret),
+                                signature_destination: hex::encode(&comm_msg_ad.contract_message.commitment_secret),
+                                status: "commit".to_string(),
+                                method: "arbitrated".to_string(),
+                            };
+                            let output_json = serde_json::to_string_pretty(&output).expect("[AS] Failed to serialize CommitmentOutput");
+                            AgentAction::CompleteSuccess(output_json);
                             eprintln!("[AS] Successfully verified AD signature and obtained signed contract with *RESOLVED* state");
                         }
                     }

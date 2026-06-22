@@ -198,8 +198,7 @@ impl AgentTtp {
 
         let cm_ad = &comm_msg_ad.contract_message;
         let mut cm_ad_bytes = Vec::new();
-        cm_ad_bytes.extend_from_slice(cm_ad.file_name.as_bytes());
-        cm_ad_bytes.extend_from_slice(cm_ad.file_hash.as_bytes());
+        cm_ad_bytes.extend_from_slice(cm_ad.data_hash.as_bytes());
         cm_ad_bytes.extend_from_slice(&cm_ad.source_pubkey);
         cm_ad_bytes.extend_from_slice(&cm_ad.dest_pubkey);
         cm_ad_bytes.extend_from_slice(&cm_ad.commitment_secret);
@@ -210,8 +209,7 @@ impl AgentTtp {
 
         let cm_as = &comm_msg_as.contract_message;
         let mut cm_as_bytes = Vec::new();
-        cm_as_bytes.extend_from_slice(cm_as.file_name.as_bytes());
-        cm_as_bytes.extend_from_slice(cm_as.file_hash.as_bytes());
+        cm_as_bytes.extend_from_slice(cm_as.data_hash.as_bytes());
         cm_as_bytes.extend_from_slice(&cm_as.source_pubkey);
         cm_as_bytes.extend_from_slice(&cm_as.dest_pubkey);
         cm_as_bytes.extend_from_slice(&cm_as.commitment_secret);

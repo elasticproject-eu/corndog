@@ -232,16 +232,34 @@ impl AgentDestination {
 
                         // Check if response from TTP is "ABORTED" or "RESOLVED"
                         if signed_msg_ttp.response_type.as_str() == "ABORTED" {
+                            // Verify TTP signed on "ABORT" || serilized_abort_request
+                            let _signed_abort_req = match &signed_msg_ttp.signed_abort_req_as {
+                                Some(b) => b.clone(),
+                                None => return AgentAction::CompleteFailure("[AD] TTP ABORTED response missing signed_abort_req_as".to_string()),
+                            };
                             // Verify signature of TTP on reconstruct message: ABORT || signed_abort_req_as
                             let mut msg_bytes = Vec::new();
                             msg_bytes.extend_from_slice("ABORT".as_bytes());
                             msg_bytes.extend_from_slice(&signed_msg_ttp.signed_abort_req_as.unwrap());
 
                             if !Identity::verify(&signed_msg_ttp.ttp_verifying_key, &msg_bytes, &signed_msg_ttp.ttp_signature) {
-                                panic!("[AS] Failed to verify signature of TTP");
-                                // No need to do anything
+                                return AgentAction::CompleteFailure("[AD] Failed to verify TTP ABORTED signature".to_string());
                             }
                             eprintln!("[AS] Successfully verified AD signature and obtained signed contract with *ABORTED* state");
+
+                            let output = CommitmentOutput {
+                                source_id: hex::encode(&self.source_pubkey),
+                                dest_id: hex::encode(&self.dest_pubkey),
+                                data: self.data_string.clone(),
+                                hash: self.expected_hash.clone(),
+                                signature_source: hex::encode(&self.comm_msg_as.as_ref().unwrap().contract_message.commitment_secret),
+                                signature_destination: hex::encode(&self.contract_message.commitment_secret),
+                                status: "rollback".to_string(),
+                                method: "arbitrated".to_string(),
+                            };
+                            let output_json = serde_json::to_string_pretty(&output).expect("[AD] Failed to serialize CommitmentOutput");
+                            AgentAction::CompleteSuccess(output_json);
+                            eprintln!("[AD] Successfully verified TTP signature and obtained signed contract with *ABORTED* state");
                         } else {
                             // Response type of TTP is "RESOLVED"
                             // AS reconstruct comm_msg_as || comm_msg_ad
@@ -260,6 +278,20 @@ impl AgentDestination {
                                 panic!("[AD] Failed to verify signature of TTP");
                                 // No need to do anything
                             }
+
+                            let output = CommitmentOutput {
+                                source_id: hex::encode(&self.source_pubkey),
+                                dest_id:   hex::encode(&self.dest_pubkey),
+                                data:      self.data_string.clone(),
+                                hash:      self.expected_hash.clone(),
+                                signature_source:      hex::encode(&comm_msg_as.contract_message.commitment_secret),
+                                signature_destination: hex::encode(&self.contract_message.commitment_secret),
+                                status: "commit".to_string(),
+                                method: "arbitrated".to_string(),
+                            };
+                            let output_json = serde_json::to_string_pretty(&output).expect("[AD] Failed to serialize CommitmentOutput");
+                            AgentAction::CompleteSuccess(output_json);
+
                             eprintln!("[AD] Successfully verified AD signature and obtained signed contract with *RESOLVED* state");
                         }
                     }

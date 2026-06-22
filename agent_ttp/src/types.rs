@@ -17,8 +17,7 @@ pub struct ResolveRequest {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ContractMessage {
     pub contract_id: String,
-    pub file_name: String,
-    pub file_hash: String,
+    pub data_hash: String,
     pub source_pubkey: Vec<u8>,
     pub dest_pubkey: Vec<u8>,
     pub commitment_secret: Vec<u8>,
