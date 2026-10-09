@@ -333,16 +333,18 @@ The TTP guarantees consistency: once a session is ABORTED it can never be RESOLV
 ## 10. Performance
 
 Optimistic protocol allows migration to proceed without any external coordination node unless a problem occurs.
-The experimental performance of Corndog shows that it can confirm a migration in 1.86 ms within a single Azure region of Virtual Machines deployment.
+The experimental performance of Corndog shows that it can confirm a migration in 1.86 ms within a single Azure region.
 
 ---
 
-## 11. Security consideration
+## 11. Security considerations
 
 A theoretical demonstration of the security of Corndog show that it can reliably confirm the succes of a migration operation even if one party to the migration and some fraction of the arbitrators are compromised.
 - **Atomicity** — No doubt as to who is responsible for a migrated resource after-the-fact.
 - **Accountability** — System operators can act confidently once migration completes, since they can prove that the other node will receive the same result.
 - **Fault-tolerance** — Coordination infrastructure can be replicated to avoid single points of failure
+
+However, this is an early prototype of the protocol; the protocol has not been subject to formal analysis, and the security its implementation is not guaranteed.
 
 ---
 
