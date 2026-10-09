@@ -18,8 +18,8 @@ _AI Note: While the protocol implementations compiled to Wasm are written in the
 8. [Understanding the output](#8-understanding-the-output)
 9. [Testing timeout and TTP scenarios](#9-testing-timeout-and-ttp-scenarios)
 10. [Performance](#10-performance)
-11. [Security consideration](#11-security-considerations)
-12. [Fundng](#10-funding)
+11. [Security consideration](#11-security-consideration)
+12. [Funding](#10-funding)
 
 ---
 
@@ -340,9 +340,9 @@ The experimental performance of Corndog shows that it can confirm a migration in
 ## 11. Security consideration
 
 A theoretical demonstration of the security of Corndog show that it can reliably confirm the succes of a migration operation even if one party to the migration and some fraction of the arbitrators are compromised.
-- **Atomicity** - No doubt as to who is responsible for a migrated resource after-the-fact.
-- **Accountability** - System operators can act confidently once migration completes, since they can prove that the other node will receive the same result.
-- **Fault-tolerance** - Coordination infrastructure can be replicated to avoid single points of failure
+- **Atomicity** — No doubt as to who is responsible for a migrated resource after-the-fact.
+- **Accountability** — System operators can act confidently once migration completes, since they can prove that the other node will receive the same result.
+- **Fault-tolerance** — Coordination infrastructure can be replicated to avoid single points of failure
 
 ---
 
