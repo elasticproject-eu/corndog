@@ -65,6 +65,7 @@ At the end of a successful exchange both parties independently print the same JS
 
 ### Optimal / Normal Case
 
+```text
 RS                                  RD                         TTP
 |                                   |                           |
 |-- StringTransfer (data) --------->|                           |
@@ -77,6 +78,7 @@ RS                                  RD                         TTP
 |<-- secret_ad (32 bytes) ----------|                           |
 |                                   |                           |
 [Both print JSON receipt to stdout]
+```
 
 ### What the messages contain
 
