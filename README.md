@@ -17,7 +17,9 @@ _AI Note: While the protocol implementations compiled to Wasm are written in the
 7. [Running the protocol](#7-running-the-protocol)
 8. [Understanding the output](#8-understanding-the-output)
 9. [Testing timeout and TTP scenarios](#9-testing-timeout-and-ttp-scenarios)
-10. [Fundng](#10-funding)
+10. [Performance](#10-performance)
+11. [Security consideration](#11-security-considerations)
+12. [Fundng](#10-funding)
 
 ---
 
@@ -326,6 +328,18 @@ The TTP guarantees consistency: once a session is ABORTED it can never be RESOLV
 
 ---
 
-## 10. Funding
+## 10. Performance
+
+The experimental performance of Corndog shows that it can confirm a migration in 1.86ms within a single Azure region of Virtual Machines deployment.
+
+---
+
+# 11. Security consideration
+
+A theoretical demonstration of the security of Corndog show that it can reliably confirm the succes of a migration operation even if one party to the migration and some fraction of the arbitrators are compromised.
+
+---
+
+## 12. Funding
 
 This work has been partially supported by the [ELASTIC project](https://elasticproject.eu/), which received funding from the [Smart Networks and Services Joint Undertaking](https://smart-networks.europa.eu/) (SNS JU) under the European Union’s [Horizon Europe](https://research-and-innovation.ec.europa.eu/funding/funding-opportunities/funding-programmes-and-open-calls/horizon-europe_en) research and innovation programme under [Grant Agreement No. 101139067](https://cordis.europa.eu/project/id/101139067). Views and opinions expressed are however those of the author(s) only and do not necessarily reflect those of the European Union. Neither the European Union nor the granting authority can be held responsible for them.
