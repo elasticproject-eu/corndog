@@ -17,6 +17,7 @@ _AI Note: While the protocol implementations compiled to Wasm are written in the
 7. [Running the protocol](#7-running-the-protocol)
 8. [Understanding the output](#8-understanding-the-output)
 9. [Testing timeout and TTP scenarios](#9-testing-timeout-and-ttp-scenarios)
+10. [Fundng](#10-funding)
 
 ---
 
@@ -324,3 +325,7 @@ When a timeout occurs, the affected party contacts the TTP. The TTP either:
 The TTP guarantees consistency: once a session is ABORTED it can never be RESOLVED, and vice versa.
 
 ---
+
+## 10. Funding
+
+This work has been partially supported by the [ELASTIC project](https://elasticproject.eu/), which received funding from the [Smart Networks and Services Joint Undertaking](https://smart-networks.europa.eu/) (SNS JU) under the European Union’s [Horizon Europe](https://research-and-innovation.ec.europa.eu/funding/funding-opportunities/funding-programmes-and-open-calls/horizon-europe_en) research and innovation programme under [Grant Agreement No. 101139067](https://cordis.europa.eu/project/id/101139067). Views and opinions expressed are however those of the author(s) only and do not necessarily reflect those of the European Union. Neither the European Union nor the granting authority can be held responsible for them.
