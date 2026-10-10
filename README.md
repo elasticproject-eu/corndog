@@ -334,7 +334,8 @@ The TTP guarantees consistency: once a session is ABORTED it can never be RESOLV
 
 Optimistic protocol allows migration to proceed without any external coordination node unless a problem occurs.
 The experimental performance of Corndog shows that it can confirm a migration in 1.86 ms within a single Azure region.
-![performance](assets/performance.pdf)
+
+![performance](assets/performance.png)
 ---
 
 ## 11. Security considerations
