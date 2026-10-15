@@ -38,6 +38,9 @@ struct Cli {
     /// Address to listen on for incoming runtime connections.
     #[arg(long, default_value = "0.0.0.0:9705", value_name = "ADDR")]
     listen_addr: SocketAddr,
+    /// Location of protocol component
+    #[arg(long)]
+    component_path: std::path::PathBuf,
 }
 
 #[tokio::main]
@@ -55,7 +58,7 @@ async fn main() -> Result<()> {
     let (tx, rx) = mpsc::channel::<TtpRequest>(32);
     // Spawn a single task that owns a agent_ttp Wasm instance that is being share
     let local = tokio::task::LocalSet::new();
-    local.spawn_local(ttp_worker(rx));
+    local.spawn_local(ttp_worker(cli.component_path, rx));
 
     // Listen for connection
     let listener = TcpListener::bind(cli.listen_addr).await?;
@@ -79,7 +82,7 @@ async fn main() -> Result<()> {
 }
 
 // Requestes from different connections are queued through the mpsc channel
-async fn ttp_worker(mut rx: mpsc::Receiver<TtpRequest>) {
+async fn ttp_worker(component_path: std::path::PathBuf, mut rx: mpsc::Receiver<TtpRequest>) {
     let mut config = Config::new();
     config.wasm_component_model(true);
     config.async_support(true);
@@ -98,7 +101,7 @@ async fn ttp_worker(mut rx: mpsc::Receiver<TtpRequest>) {
 
     let component = Component::from_file(
         &engine,
-        "target/wasm32-wasip2/release/agent_ttp.wasm"
+        &component_path
     ).expect("[RuntimeTTP] Failed to load component");
     
     info!("TTP Agent Wasm Component loaded");

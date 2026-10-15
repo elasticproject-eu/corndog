@@ -68,6 +68,10 @@ struct Cli {
     /// Address of the TTP runtime to connect to.
     #[arg(long, default_value = "0.0.0.0:9705", value_name = "ADDR")]
     ttp_addr: SocketAddr,
+
+    /// Location of protocol component
+    #[arg(long)]
+    component_path: std::path::PathBuf,
 }
 
 fn load_or_generate_signing_key(path: &PathBuf) -> Result<SigningKey> {
@@ -181,12 +185,12 @@ async fn main() -> Result<()> {
     info!("✓ Connected to TTP");
 
     // Handle the exchange
-    fair_exchange(stream, stream_ttp, dest_pubkey, own_string, own_hash, expected_source_pubkey,).await?;
+    fair_exchange(cli.component_path.clone(), stream, stream_ttp, dest_pubkey, own_string, own_hash, expected_source_pubkey,).await?;
     
     Ok(())
 }
 
-async fn fair_exchange(mut stream: TcpStream, mut stream_ttp: TcpStream, dest_pubkey: Vec<u8>, own_string: String, own_hash: String, expected_source_pubkey: Vec<u8>,) -> Result<()> {
+async fn fair_exchange(component_path: PathBuf, mut stream: TcpStream, mut stream_ttp: TcpStream, dest_pubkey: Vec<u8>, own_string: String, own_hash: String, expected_source_pubkey: Vec<u8>,) -> Result<()> {
 // ── Step 1: Receive the StringTransfer from Source ────────────────────────
     let transfer_bytes = receive_bytes(&mut stream).await
         .context("Failed to receive StringTransfer from RS")?;
@@ -241,7 +245,7 @@ async fn fair_exchange(mut stream: TcpStream, mut stream_ttp: TcpStream, dest_pu
 
     let component = Component::from_file(
         &engine,
-        "target/wasm32-wasip2/release/agent_source_destination.wasm"
+        &component_path
     )?;
     
     info!("Wasm Component loaded");

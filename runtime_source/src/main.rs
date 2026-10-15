@@ -71,6 +71,10 @@ struct Cli {
     /// Address of the TTP runtime to connect to.
     #[arg(long, default_value = "0.0.0.0:9705", value_name = "ADDR")]
     ttp_addr: SocketAddr,
+
+    /// Location of protocol component
+    #[arg(long)]
+    component_path: std::path::PathBuf,
 }
 
 /// Load a SigningKey from a hex file, or generate + save a new one if missing.
@@ -190,6 +194,7 @@ async fn main() -> Result<()> {
 
     // 6. Run the fair-exchange protocol
     fair_exchange(
+        cli.component_path.clone(),
         stream_d,
         stream_ttp,
         input_string,
@@ -203,7 +208,9 @@ async fn main() -> Result<()> {
 
 }
 
-async fn fair_exchange(mut stream_d: TcpStream,
+async fn fair_exchange(
+    component_path: PathBuf,
+    mut stream_d: TcpStream,
     mut stream_ttp: TcpStream,
     input_string: String,
     string_hash: String,
@@ -226,7 +233,7 @@ async fn fair_exchange(mut stream_d: TcpStream,
         table: ResourceTable::new(),
     });
 
-    let component = Component::from_file(&engine, "target/wasm32-wasip2/release/agent_source_destination.wasm")?;
+    let component = Component::from_file(&engine, component_path)?;
 
     info!("Wasm Component loaded");
 
