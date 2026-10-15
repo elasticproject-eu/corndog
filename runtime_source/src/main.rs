@@ -66,15 +66,15 @@ struct Cli {
 
     /// Address of the Destination runtime to connect to.
     #[arg(long, default_value = "0.0.0.0:7760", value_name = "ADDR")]
-    destination_addr: SocketAddr,
+    destination_addr: String,
 
     /// Address of the TTP runtime to connect to.
     #[arg(long, default_value = "0.0.0.0:9705", value_name = "ADDR")]
-    ttp_addr: SocketAddr,
+    ttp_addr: String,
 
     /// Location of protocol component
-    #[arg(long)]
-    component_path: std::path::PathBuf,
+    #[arg(long, required_unless_present = "generate_keypair")]
+    component_path: Option<std::path::PathBuf>,
 }
 
 /// Load a SigningKey from a hex file, or generate + save a new one if missing.
@@ -182,19 +182,19 @@ async fn main() -> Result<()> {
     info!("✓ String BLAKE3 hash: {}", string_hash);
 
         // 5. Connect to RD and TTP
-    let stream_d = TcpStream::connect(cli.destination_addr)
+    let stream_d = TcpStream::connect(&cli.destination_addr)
         .await
         .context("Failed to connect to Runtime Destination")?;
     info!("✓ Connected to destination");
 
-    let stream_ttp = TcpStream::connect(cli.ttp_addr)
+    let stream_ttp = TcpStream::connect(&cli.ttp_addr)
         .await
         .context("Failed to connect to Runtime TTP")?;
     info!("✓ Connected to TTP");
 
     // 6. Run the fair-exchange protocol
     fair_exchange(
-        cli.component_path.clone(),
+        cli.component_path.unwrap().clone(),
         stream_d,
         stream_ttp,
         input_string,

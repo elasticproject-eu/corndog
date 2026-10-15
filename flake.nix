@@ -80,31 +80,36 @@
                     cargoExtraArgs = "-p runtime_destination";
                   });
 
+                  ttp-wrapper = pkgs.writeShellApplication {
+                    name = "corndog-ttp";
+                    text = ''
+                      ${runtime-ttp}/bin/runtime_ttp --component-path ${ttp-component}/lib/agent_ttp.wasm "$@"
+                    '';
+                  };
+
+                  source-wrapper = pkgs.writeShellApplication {
+                    name = "corndog-source";
+                    text = ''
+                      ${runtime-source}/bin/runtime_source --component-path ${agent-component}/lib/agent_source_destination.wasm "$@"
+                    '';
+                  };
+
+                  destination-wrapper = pkgs.writeShellApplication {
+                    name = "corndog-destination";
+                    text = ''
+                      ${runtime-destination}/bin/runtime_destination --component-path ${agent-component}/lib/agent_source_destination.wasm "$@"
+                    '';
+                  };
+
+
                 in {
 
                   packages.agent-component = agent-component;
                   packages.ttp-component = ttp-component;
 
-                  packages.ttp = pkgs.writeShellApplication {
-                    name = "corndog-ttp";
-                    text = ''
-                      ${runtime-ttp}/bin/runtime_ttp --component-path ${ttp-component}/lib/agent_ttp.wasm
-                    '';
-                  };
-
-                  packages.source = pkgs.writeShellApplication {
-                    name = "corndog-source";
-                    text = ''
-                      ${runtime-source}/bin/runtime_source --component-path ${agent-component}/lib/agent_source_destination.wasm
-                    '';
-                  };
-
-                  packages.destination = pkgs.writeShellApplication {
-                    name = "corndog-destination";
-                    text = ''
-                      ${runtime-destination}/bin/runtime_destination --component-path ${agent-component}/lib/agent_source_destination.wasm
-                    '';
-                  };
+                  packages.ttp = ttp-wrapper;
+                  packages.source = source-wrapper;
+                  packages.destination = destination-wrapper;
 
                   checks.clippy-wasm = craneLib.cargoClippy ( commonArgs // {
                     inherit agent-component ttp-component;
@@ -113,6 +118,55 @@
                     cargoArtifacts = wasmArtifacts;
                     cargoClippyExtraArgs = "-p agent_source_destination -p agent_ttp";
                   });
+
+                  checks.end-to-end = pkgs.testers.runNixOSTest {
+                    name = "end-to-end corndog";
+                    containers = {
+                      source = { config, pkgs, ... }: {
+                        system.stateVersion = "26.05";
+                        system.fsPackages = [ source-wrapper pkgs.netcat ];
+                      };
+
+                      destination = { config, pkgs, ... }: {
+                        system.stateVersion = "26.05";
+                        system.fsPackages = [ destination-wrapper ];
+                        networking.firewall.allowedTCPPorts = [ 7760 ];
+                      };
+
+                      ttp = { config, pkgs, ... }: {
+                        system.stateVersion = "26.05";
+                        system.fsPackages = [ ttp-wrapper ];
+                        networking.firewall.allowedTCPPorts = [ 9705 ];
+                      };
+                    };
+
+                    testScript = { nodes, ... }: ''
+                      start_all();
+                      source.wait_for_unit('default.target')
+
+                      with subtest('Generate key material'):
+                        source.succeed('corndog-source --force --generate-keypair /tmp/shared/source.key')
+                        source.wait_for_file('/tmp/shared/source.key', 0)
+                        source.wait_for_file('/tmp/shared/source.key.pub', 0)
+                        destination.wait_for_file('/tmp/shared/source.key.pub', 0)
+
+                        destination.succeed('corndog-destination --force --generate-keypair /tmp/shared/destination.key')
+                        destination.wait_for_file('/tmp/shared/destination.key', 0)
+                        destination.wait_for_file('/tmp/shared/destination.key.pub', 0)
+                        source.wait_for_file('/tmp/shared/destination.key.pub', 0)
+
+                      with subtest('Run the protocol'):
+                          ttp.succeed("(corndog-ttp >/tmp/ttp.log 2>&1; echo $?>/tmp/ttp.rc) >/dev/null &");
+                          ttp.wait_until_succeeds("ss -Htln sport = :9705 | grep -q .", timeout=30)
+
+                          destination.succeed("(echo Test | corndog-destination --dest-private-key /tmp/shared/destination.key --source-public-key /tmp/shared/source.key.pub --ttp-addr ttp:9705 >/tmp/dest.log 2>&1; echo $? > /tmp/dest.rc)  >/dev/null &")
+                          destination.wait_until_succeeds("ss -Htln sport = :7760 | grep -q .", timeout=30)
+
+                          source.succeed("echo Test | corndog-source --source-private-key /tmp/shared/source.key --destination-public-key /tmp/shared/destination.key.pub --destination-addr destination:7760 --ttp-addr ttp:9705", timeout=60)
+                          destination.wait_for_file("/tmp/dest.rc", timeout=5)
+                          destination.succeed('[ "$(cat /tmp/dest.rc)" -eq 0 ]')
+                    '';
+                  };
 
                   devShells.default = craneLib.devShell {
                     packages = with pkgs; [

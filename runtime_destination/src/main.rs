@@ -63,15 +63,15 @@ struct Cli {
 
     /// Address to listen on for incoming Source connections.
     #[arg(long, default_value = "0.0.0.0:7760", value_name = "ADDR")]
-    listen_addr: SocketAddr,
+    listen_addr: String,
 
     /// Address of the TTP runtime to connect to.
-    #[arg(long, default_value = "0.0.0.0:9705", value_name = "ADDR")]
-    ttp_addr: SocketAddr,
+    #[arg(long, default_value = "127.0.0.1:9705", value_name = "ADDR")]
+    ttp_addr: String,
 
     /// Location of protocol component
-    #[arg(long)]
-    component_path: std::path::PathBuf,
+    #[arg(long, required_unless_present = "generate_keypair")]
+    component_path: Option<std::path::PathBuf>,
 }
 
 fn load_or_generate_signing_key(path: &PathBuf) -> Result<SigningKey> {
@@ -175,7 +175,7 @@ async fn main() -> Result<()> {
     info!("✓ Own BLAKE3 hash: {}", own_hash);
 
     // Listen for connection from source
-    let listener = TcpListener::bind(cli.listen_addr).await?;
+    let listener = TcpListener::bind(&cli.listen_addr).await?;
     eprintln!("Listening on {}", cli.listen_addr);
 
     let (stream, addr) = listener.accept().await?;
@@ -185,7 +185,7 @@ async fn main() -> Result<()> {
     info!("✓ Connected to TTP");
 
     // Handle the exchange
-    fair_exchange(cli.component_path.clone(), stream, stream_ttp, dest_pubkey, own_string, own_hash, expected_source_pubkey,).await?;
+    fair_exchange(cli.component_path.unwrap().clone(), stream, stream_ttp, dest_pubkey, own_string, own_hash, expected_source_pubkey,).await?;
     
     Ok(())
 }
