@@ -124,18 +124,18 @@
                     containers = {
                       source = { config, pkgs, ... }: {
                         system.stateVersion = "26.05";
-                        system.fsPackages = [ source-wrapper pkgs.netcat ];
+                        environment.systemPackages = [ source-wrapper pkgs.jq ];
                       };
 
                       destination = { config, pkgs, ... }: {
                         system.stateVersion = "26.05";
-                        system.fsPackages = [ destination-wrapper ];
+                        environment.systemPackages = [ destination-wrapper pkgs.jq ];
                         networking.firewall.allowedTCPPorts = [ 7760 ];
                       };
 
                       ttp = { config, pkgs, ... }: {
                         system.stateVersion = "26.05";
-                        system.fsPackages = [ ttp-wrapper ];
+                        environment.systemPackages = [ ttp-wrapper ];
                         networking.firewall.allowedTCPPorts = [ 9705 ];
                       };
                     };
@@ -156,15 +156,21 @@
                         source.wait_for_file('/tmp/shared/destination.key.pub', 0)
 
                       with subtest('Run the protocol'):
-                          ttp.succeed("(corndog-ttp >/tmp/ttp.log 2>&1; echo $?>/tmp/ttp.rc) >/dev/null &");
+                          ttp.succeed("(corndog-ttp >/tmp/ttp.log 2>/tmp/ttp.err; echo $?>/tmp/ttp.rc) >/dev/null &");
                           ttp.wait_until_succeeds("ss -Htln sport = :9705 | grep -q .", timeout=30)
 
-                          destination.succeed("(echo Test | corndog-destination --dest-private-key /tmp/shared/destination.key --source-public-key /tmp/shared/source.key.pub --ttp-addr ttp:9705 >/tmp/dest.log 2>&1; echo $? > /tmp/dest.rc)  >/dev/null &")
+                          destination.succeed("(echo Test | corndog-destination --dest-private-key /tmp/shared/destination.key --source-public-key /tmp/shared/source.key.pub --ttp-addr ttp:9705 >/tmp/dest.log 2>/tmp/dest.err; echo $? > /tmp/dest.rc)  >/dev/null &")
                           destination.wait_until_succeeds("ss -Htln sport = :7760 | grep -q .", timeout=30)
 
-                          source.succeed("echo Test | corndog-source --source-private-key /tmp/shared/source.key --destination-public-key /tmp/shared/destination.key.pub --destination-addr destination:7760 --ttp-addr ttp:9705", timeout=60)
+                          source.succeed("echo Test | corndog-source --source-private-key /tmp/shared/source.key --destination-public-key /tmp/shared/destination.key.pub --destination-addr destination:7760 --ttp-addr ttp:9705 > /tmp/source.log", timeout=60)
                           destination.wait_for_file("/tmp/dest.rc", timeout=5)
                           destination.succeed('[ "$(cat /tmp/dest.rc)" -eq 0 ]')
+
+                          source.succeed('[ "$(jq -r .status < /tmp/source.log)"  = commit ]')
+                          source.succeed('[ "$(jq -r .method < /tmp/source.log)"  = direct ]')
+
+                          destination.succeed('[ "$(jq -r .status < /tmp/dest.log)" = commit ]')
+                          destination.succeed('[ "$(jq -r .method < /tmp/dest.log)" = direct ]')
                     '';
                   };
 
