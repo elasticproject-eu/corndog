@@ -192,8 +192,14 @@
                     type = "app";
                     program = pkgs.writeShellApplication {
                       name = "corndog-demo";
-                      runtimeInputs = [pkgs.tmux ttp-wrapper source-wrapper destination-wrapper];
-                      text = builtins.readFile ./demo.sh;
+                      runtimeInputs = [
+                        pkgs.tmux pkgs.tmuxp
+                        ttp-wrapper source-wrapper destination-wrapper
+                        ];
+                      text = ''
+                        DEMO_PATH="$(mktemp -d --suffix "corndog")" tmuxp load ${./corndog-demo.tmuxp.yaml}
+                        rm -rf "$DEMO_PATH"
+                      '';
                     };
                   };
 
