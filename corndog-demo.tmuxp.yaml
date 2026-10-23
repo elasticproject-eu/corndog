@@ -2,6 +2,8 @@ session_name: corndog-demo
 windows:
   - window_name: demo
     layout: main-horizontal
+    options:
+      main-pane-height: 30%
     shell_command_before :
       - corndog-source      --force --generate-keypair "$DEMO_PATH/corndog-source.key"
       - corndog-destination --force --generate-keypair "$DEMO_PATH/corndog-destination.key"

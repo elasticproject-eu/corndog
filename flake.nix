@@ -197,7 +197,8 @@
                         ttp-wrapper source-wrapper destination-wrapper
                         ];
                       text = ''
-                        DEMO_PATH="$(mktemp -d --suffix "corndog")" tmuxp load ${./corndog-demo.tmuxp.yaml}
+                        DEMO_PATH="$(mktemp -d --suffix "corndog")" 
+                        DEMO_PATH="$DEMO_PATH" tmuxp load ${./corndog-demo.tmuxp.yaml}
                         rm -rf "$DEMO_PATH"
                       '';
                     };
