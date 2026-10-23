@@ -101,27 +101,7 @@
                     '';
                   };
 
-
-                in {
-
-                  packages.agent-component = agent-component;
-                  packages.ttp-component = ttp-component;
-
-                  packages.ttp = ttp-wrapper;
-                  packages.source = source-wrapper;
-                  packages.destination = destination-wrapper;
-
-                  checks.clippy-wasm = craneLib.cargoClippy ( commonArgs // {
-                    inherit agent-component ttp-component;
-                    pname = "corndog-wasm";
-                    version = "0.0.0";
-                    cargoArtifacts = wasmArtifacts;
-                    cargoClippyExtraArgs = "-p agent_source_destination -p agent_ttp";
-                  });
-
-                  checks.end-to-end = pkgs.testers.runNixOSTest {
-                    name = "end-to-end corndog";
-                    containers = {
+                  testMachines = {
                       source = { config, pkgs, ... }: {
                         system.stateVersion = "26.05";
                         environment.systemPackages = [ source-wrapper pkgs.jq ];
@@ -138,9 +118,9 @@
                         environment.systemPackages = [ ttp-wrapper ];
                         networking.firewall.allowedTCPPorts = [ 9705 ];
                       };
-                    };
+                  };
 
-                    testScript = { nodes, ... }: ''
+                  testScript = { nodes, ... }: ''
                       start_all();
                       source.wait_for_unit('default.target')
 
@@ -172,6 +152,63 @@
                           destination.succeed('[ "$(jq -r .status < /tmp/dest.log)" = commit ]')
                           destination.succeed('[ "$(jq -r .method < /tmp/dest.log)" = direct ]')
                     '';
+
+
+
+                in {
+
+                  packages.agent-component = agent-component;
+                  packages.ttp-component = ttp-component;
+
+                  packages.ttp = ttp-wrapper;
+                  packages.source = source-wrapper;
+                  packages.destination = destination-wrapper;
+
+                  apps.ttp = {
+                    type  = "app";
+                    program = ttp-wrapper;
+                    meta = {
+                      description = "Trusted arbitrator for Corndog protocol";
+                    };
+                  };
+
+                  apps.source = {
+                    type  = "app";
+                    program = source-wrapper;
+                    meta = {
+                      description = "Migration source for Corndog protocol";
+                    };
+                  };
+
+                  apps.destination = {
+                    type  = "app";
+                    program = destination-wrapper;
+                    meta = {
+                      description = "Migration destination for Corndog protocol";
+                    };
+                  };
+
+                  apps.demo = {
+                    type = "app";
+                    program = pkgs.writeShellApplication {
+                      name = "corndog-demo";
+                      runtimeInputs = [pkgs.tmux ttp-wrapper source-wrapper destination-wrapper];
+                      text = builtins.readFile ./demo.sh;
+                    };
+                  };
+
+                  checks.clippy-wasm = craneLib.cargoClippy ( commonArgs // {
+                    inherit agent-component ttp-component;
+                    pname = "corndog-wasm";
+                    version = "0.0.0";
+                    cargoArtifacts = wasmArtifacts;
+                    cargoClippyExtraArgs = "-p agent_source_destination -p agent_ttp";
+                  });
+
+                  checks.end-to-end = pkgs.testers.runNixOSTest {
+                    name = "end-to-end corndog";
+                    nodes = testMachines;
+                    inherit testScript;
                   };
 
                   devShells.default = craneLib.devShell {
